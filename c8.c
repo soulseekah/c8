@@ -136,21 +136,25 @@ void cpu_dump(CPU_t *cpu) {
  */
 void display_dump(Display_t *display) {
 	/** Frames */
+	printf(" ");
 	for (int f = 0; f < 64; f++)
 		printf("-");
 
 	for (int y = 0; y < 32; y++) {
 		printf("\n|");
-		int p = display->p[y];
+		uint64_t p = display->p[y];
 		for (int x = 0; x < 64; x++) {
 			printf("%c", p & 0x1 ? '*' : ' ');
-			p >>= 1;
+			p = p >> 1;
 		}
-		printf("|\n");
+		printf("|");
 	}
+	printf("\n");
 
+	printf(" ");
 	for (int f = 0; f < 64; f++)
 		printf("-");
+	printf("\n");
 }
 
 /**
@@ -163,6 +167,29 @@ void display_dump(Display_t *display) {
 void display_clear(Display_t *display) {
 	for (int p = 0; p < 32; p++)
 		display->p[p] = 0;
+}
+
+/**
+ * Draw a row on this display.
+ *
+ * \param display The display to draw on.
+ * \param row The 8-bit row.
+ * \param x The x coordinate.
+ * \param y The y coordinate.
+ *
+ * \return bool Whether pixels were turned from on to off.
+ */
+bool display_draw_row(Display_t *display, uint8_t row, uint8_t x, uint8_t y) {
+	/** Mirror the row */
+	row = (row & 0xF0) >> 4 | (row & 0x0F) << 4;
+	row = (row & 0xCC) >> 2 | (row & 0x33) << 2;
+	row = (row & 0xAA) >> 1 | (row & 0x55) << 1;
+
+	uint64_t before = display->p[y];
+	display->p[y] ^= ((uint64_t)row) << x;
+	uint64_t after = display->p[y];
+
+	return before > after;
 }
 
 /**
@@ -182,17 +209,16 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 	
 	} else if (/* DXYN */ ((instruction >> 12) & 0xf) == 0xd /* Draw 8xN sprite at VX VY, set VF to screen set */) {
 
+		bool unset = false;
+
 		uint8_t x = cpu->v[(instruction >> 8) & 0xf];
 		uint8_t y = cpu->v[(instruction & 0xf0) >> 4];
 		for (uint8_t h = 0; h < (instruction & 0xf); h++) {
-			uint8_t data = rom_read(cpu->rom, cpu->i - 0x200 + h);
-
-			/** \todo figure this out */
-			printf("put %0x at %0x %0x\n", data, x, y - h);
+			if (display_draw_row(cpu->display, rom_read(cpu->rom, cpu->i - 0x200 + h), x, y - h)) {
+				unset = true;
+			}
 		}
-
-		// printf("wants to draw sprite of height %0x from memory %04x at %04x, %04x\n", h & 0xf, cpu->i - 0x200, cpu->v[(instruction >> 8) & 0xf], cpu->v[(instruction & 0xf0) >> 4]);
-		// display_dump(cpu->display);
+		cpu->v[0xf] = unset ? 1 : 0;
 	} else {
 		fprintf(stderr, "Unknown instruction %04x!\n", instruction);
 		exit(-1);
@@ -201,6 +227,7 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 	/** Move forward */
 	cpu->pc += 2;
 }
+
 
 /**
  * Test our code.
@@ -259,9 +286,19 @@ int test(int argc, char *argv[]) {
 	int passed = 0;
 	int failed = 0;
 
+	Display_t display;
+	display_clear(&display);
+
+	/** Display clear */
+	for (uint64_t y = 0; y < 32; y++) {
+		TEST_EQUALS((uint32_t)(display.p[y] & 0xffffffff), 0);
+		TEST_EQUALS((uint32_t)((display.p[y] >> 32) & 0xffffffff), 0);
+	}
+
 	CPU_t cpu;
 	cpu_reset(&cpu);
 
+	/** Reset state */
 	TEST_EQUALS(cpu.pc, 0)
 	for (int i = 0; i < 16; i++)
 		TEST_EQUALS(cpu.v[i], 0)
@@ -278,11 +315,15 @@ int test(int argc, char *argv[]) {
 	cpu_execute(&cpu, 0xa0ff); TEST_EQUALS(cpu.i, 0x0ff)
 
 	/**
-	 * DXYN
-	 * 
-	 * Draw a sprite at position VX, VY with N bytes of sprite data starting at the address stored in I
-	 * Set VF to 01 if any set pixels are changed to unset, and 00 otherwise!
+	 * Some display tests.
+	 * \todo We should really be testing for DXYN, too.
 	 */
+	bool unset = display_draw_row(&display, 0x80, 0, 0);
+	TEST_EQUALS((uint8_t)(display.p[0] & 0xff), 0x01)
+	TEST_EQUALS((uint8_t)unset, 0)
+	unset = display_draw_row(&display, 0x80, 0, 0);
+	TEST_EQUALS((uint8_t)(display.p[0] & 0xff), 0x00)
+	TEST_EQUALS((uint8_t)unset, 1)
 
 	printf("\n%d tests: %d passed, %d failed\n", passed + failed, passed, failed);
 
