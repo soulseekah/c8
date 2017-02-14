@@ -1,6 +1,8 @@
 # c8
 A CHIP-8 Emulator. A quick C refresher to keep me on my toes.
 
+https://www.youtube.com/watch?v=6xqH3RfoJiY
+
 ## Building
 
 `make` :)
