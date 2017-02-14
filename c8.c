@@ -380,6 +380,9 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 
 	if (NULL) {
 
+	} else if (/* 00E0 */ instruction == 0x00e0 /* Clear display */) {
+		display_clear(cpu->display);
+
 	} else if (/* 00EE */ instruction == 0x00ee /* Return */) {
 		if (cpu->sp < 1) {
 			fprintf(stderr, "Stack underrun! HALTING!\n");
@@ -414,6 +417,11 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 			cpu->pc += INSTRUCTION_LENGTH;
 		}
 
+	} else if (/* 5XY0 */ ((instruction >> 12) & 0xf) == 0x5 && (instruction & 0xf) == 0x0 /* Skip instruction if VX == VY */) {
+		if (cpu->v[instruction >> 8 & 0xf] == cpu->v[(instruction & 0xf0) >> 4]) {
+			cpu->pc += INSTRUCTION_LENGTH;
+		}
+
 	} else if (/* 6XNN */ ((instruction >> 12) & 0xf) == 0x6 /* Set VX to NN */) {	
 		cpu->v[instruction >> 8 & 0xf] = instruction & 0xff;
 
@@ -422,8 +430,12 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 
 	} else if (/* 8XY0 */ ((instruction >> 12) & 0xf) == 0x8 && (instruction & 0xf) == 0x0 /* VX = VY */) {
 		cpu->v[instruction >> 8 & 0xf] = cpu->v[(instruction & 0xf0) >> 4];
+	} else if (/* 8XY1 */ ((instruction >> 12) & 0xf) == 0x8 && (instruction & 0xf) == 0x1 /* VX = VX | VY */) {
+		cpu->v[instruction >> 8 & 0xf] |= cpu->v[(instruction & 0xf0) >> 4];
 	} else if (/* 8XY2 */ ((instruction >> 12) & 0xf) == 0x8 && (instruction & 0xf) == 0x2 /* VX = VX & VY */) {
 		cpu->v[instruction >> 8 & 0xf] &= cpu->v[(instruction & 0xf0) >> 4];
+	} else if (/* 8XY3 */ ((instruction >> 12) & 0xf) == 0x8 && (instruction & 0xf) == 0x3 /* VX = VX ^ VY */) {
+		cpu->v[instruction >> 8 & 0xf] ^= cpu->v[(instruction & 0xf0) >> 4];
 	} else if (/* 8XY4 */ ((instruction >> 12) & 0xf) == 0x8 && (instruction & 0xf) == 0x4 /* VX = VX + VY, VF carry */) {
 		uint8_t carry = cpu->v[instruction >> 8 & 0xf];
 		cpu->v[instruction >> 8 & 0xf] += cpu->v[(instruction & 0xf0) >> 4];
@@ -431,6 +443,20 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 	} else if (/* 8XY5 */ ((instruction >> 12) & 0xf) == 0x8 && (instruction & 0xf) == 0x5 /* VX = VX - VY, VF borrow */) {
 		cpu->v[0xf] = (cpu->v[(instruction & 0xf0) >> 4] <= cpu->v[instruction >> 8 & 0xf]); /** Borrow */
 		cpu->v[instruction >> 8 & 0xf] -= cpu->v[(instruction & 0xf0) >> 4];
+	} else if (/* 8XY6 */ ((instruction >> 12) & 0xf) == 0x8 && (instruction & 0xf) == 0x6 /* VX = VY >> 1, VF = VY & 0x1 */) {
+		cpu->v[0xf] = cpu->v[(instruction & 0xf0) >> 4] & 0x1;
+		cpu->v[instruction >> 8 & 0xf] = cpu->v[(instruction & 0xf0) >> 4] >> 1;
+	} else if (/* 8XY7 */ ((instruction >> 12) & 0xf) == 0x8 && (instruction & 0xf) == 0x7 /* VX = VY - VX, VF borrow */) {
+		cpu->v[0xf] = (cpu->v[(instruction & 0xf0) >> 4] > cpu->v[instruction >> 8 & 0xf]); /** Borrow */
+		cpu->v[instruction >> 8 & 0xf] = cpu->v[(instruction & 0xf0) >> 4] - cpu->v[instruction >> 8 & 0xf];
+	} else if (/* 8XYE */ ((instruction >> 12) & 0xf) == 0x8 && (instruction & 0xf) == 0xe /* VX = VY << 1, VF = VY >> 7 & 0x1 */) {
+		cpu->v[0xf] = (cpu->v[(instruction & 0xf0) >> 4] >> 7) & 0x1;
+		cpu->v[instruction >> 8 & 0xf] = cpu->v[(instruction & 0xf0) >> 4] << 1;
+
+	} else if (/* 9XY0 */ ((instruction >> 12) & 0xf) == 0x9 && (instruction & 0xf) == 0x0 /* Skip instruction if VX != VY */) {
+		if (cpu->v[instruction >> 8 & 0xf] != cpu->v[(instruction & 0xf0) >> 4]) {
+			cpu->pc += INSTRUCTION_LENGTH;
+		}
 		
 	} else if (/* ANNN */ ((instruction >> 12) & 0xf) == 0xa /* Set I to NNN */) {
 		cpu->i = instruction & 0xfff;
@@ -452,6 +478,10 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 
 		display_render(cpu->display);
 
+	} else if (/* EX9E */ (((instruction >> 12) & 0xf) == 0xe) && ((instruction & 0xff) == 0x9e) /* Skip instruction if key VS is pressed */) {
+		if (((cpu->input >> cpu->v[instruction >> 8 & 0xf]) & 0x1))
+			cpu->pc += INSTRUCTION_LENGTH;
+
 	} else if (/* EXA1 */ (((instruction >> 12) & 0xf) == 0xe) && ((instruction & 0xff) == 0xa1) /* Skip instruction if key VX is not pressed */) {
 		if (!((cpu->input >> cpu->v[instruction >> 8 & 0xf]) & 0x1))
 			cpu->pc += INSTRUCTION_LENGTH;
@@ -459,11 +489,27 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 	} else if (/* FX07 */ (((instruction >> 12) & 0xf) == 0xf) && ((instruction & 0xff) == 0x07) /* Read delay timer to VX */) {
 		cpu->v[instruction >> 8 & 0xf] = cpu->delay;
 
+	} else if (/* FX0A */ (((instruction >> 12) & 0xf) == 0xf) && ((instruction & 0xff) == 0x0a) /* Wait for keypress and store to VX */) {
+		uint16_t input = cpu->input;
+		uint8_t key = 0;
+		while (input) {
+			if ((input >> key) & 0x1) {
+				cpu->v[instruction >> 8 & 0xf] = key;
+				cpu->pc += INSTRUCTION_LENGTH;
+				return;
+			}
+			key++;
+		}
+		return;
+
 	} else if (/* FX15 */ (((instruction >> 12) & 0xf) == 0xf) && ((instruction & 0xff) == 0x15) /* Delay timer to VX */) {
 		cpu->delay = cpu->v[instruction >> 8 & 0xf];
 
 	} else if (/* FX18 */ (((instruction >> 12) & 0xf) == 0xf) && ((instruction & 0xff) == 0x18) /* Sound timer to VX */) {
 		cpu->sound = cpu->v[instruction >> 8 & 0xf];
+
+	} else if (/* FX1E */ (((instruction >> 12) & 0xf) == 0xf) && ((instruction & 0xff) == 0x1e) /* I = I + VX */) {
+		cpu->i += cpu->v[instruction >> 8 & 0xf]; /** \todo can we overrun here? */
 
 	} else if (/* FX29 */ (((instruction >> 12) & 0xf) == 0xf) && ((instruction & 0xff) == 0x29) /* Set I to sprite in digit VX */) {
 		cpu->i = BUILTIN_SPRITES_OFFSET + (cpu->v[instruction >> 8 & 0xf] * 5);
@@ -474,6 +520,11 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 		ram_write_byte(cpu->ram, cpu->i, (value / 100) % 10);
 		ram_write_byte(cpu->ram, cpu->i + 1, (value / 10) % 10);
 		ram_write_byte(cpu->ram, cpu->i + 2, (value / 1) % 10);
+	
+	} else if (/* FX55 */ (((instruction >> 12) & 0xf) == 0xf) && ((instruction & 0xff) == 0x55) /* Fill I from V0 to VX */) {
+		for (int i = 0; i <= (instruction >> 8 & 0xf); i++) {
+			ram_write_byte(cpu->ram, cpu->i++, cpu->v[i]);
+		}
 
 	} else if (/* FX65 */ (((instruction >> 12) & 0xf) == 0xf) && ((instruction & 0xff) == 0x65) /* Fill V0 to VX from I */) {
 		for (int i = 0; i <= (instruction >> 8 & 0xf); i++) {
@@ -718,6 +769,26 @@ int test(int argc, char *argv[]) {
 	TEST_EQUALS(cpu.flags.HALT, 1);
 
 	/**
+	 * 8XY6 VX = VY >> 1, VF = LSB
+	 */
+	cpu_reset(&cpu);
+	cpu.v[0] = 0xff;
+	cpu.v[1] = 0x1;
+	cpu_execute(&cpu, 0x8016);
+	TEST_EQUALS(cpu.v[0], 0);
+	TEST_EQUALS(cpu.v[0xf], 1);
+
+	/**
+	 * 8XYE VX = VY << 1, VF = MSB
+	 */
+	cpu_reset(&cpu);
+	cpu.v[0] = 0xff;
+	cpu.v[1] = 0x80;
+	cpu_execute(&cpu, 0x801e);
+	TEST_EQUALS(cpu.v[0], 0);
+	TEST_EQUALS(cpu.v[0xf], 1);
+
+	/**
 	 * 8XY2 VX = VX & VY.
 	 */
 	cpu_reset(&cpu);
@@ -763,6 +834,23 @@ int test(int argc, char *argv[]) {
 	TEST_EQUALS(cpu.ram[0], 1);
 	TEST_EQUALS(cpu.ram[1], 2);
 	TEST_EQUALS(cpu.ram[2], 3);
+
+	/**
+	 * FX55 Fill V0 to VX from I.
+	 */
+	cpu_reset(&cpu);
+	cpu.ram = ram;
+	cpu.v[0] = 1;
+	cpu.v[1] = 2;
+	cpu.v[2] = 3;
+	cpu.v[3] = 4;
+	cpu.v[4] = 5;
+	cpu.v[5] = 6;
+	cpu_execute(&cpu, 0xf555);
+	TEST_EQUALS(cpu.ram[0], 1);
+	TEST_EQUALS(cpu.ram[2], 3);
+	TEST_EQUALS(cpu.ram[5], 6);
+	TEST_EQUALS(cpu.i, 6);
 
 	/**
 	 * FX65 Fill V0 to VX from I.

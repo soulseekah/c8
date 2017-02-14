@@ -1,7 +1,7 @@
 P=c8
 CFLAGS=`pkg-config --cflags sdl2` -std=gnu11 -O0 -Wall -Werror -g
 CC=gcc
-ROM=roms/PONG2
+ROM=roms/BLITZ
 LDLIBS=`pkg-config --libs sdl2`
 
 $(P): $(OBJECT)
