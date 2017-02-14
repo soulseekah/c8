@@ -26,7 +26,7 @@
 #define INSTRUCTION_LENGTH 2
 
 #define NELEMS(x) (sizeof(x) / sizeof((x)[0]))
-#define STRING_LEN_COUNT(s) #s, NELEMS(#s), NELEMS(#s)
+#define STRING_LEN_COUNT(s) #s, 1, NELEMS(#s) - 1
 
 /**
  * An 16-bit instruction.
@@ -181,17 +181,17 @@ c8_instruction_t ram_get_instruction(RAM_t ram, c8_address_t address) {
  *
  * \param ram The RAM to load into.
  * \param offset The offset to load to.
- * \param rom The ROM file to lead.
+ * \param rom The file to read and load.
  *
  * \return void
  */
-void ram_load_rom(RAM_t ram, c8_address_t offset, FILE *rom) {
-	while (!feof(rom) ) {
+void ram_load_file(RAM_t ram, c8_address_t offset, FILE *file) {
+	while (!feof(file) ) {
 		if (offset >= RAM_SIZE) {
 			fprintf(stderr, "Buffer overflow!");
 			exit(-1);
 		}
-		ram[offset++] = fgetc(rom);
+		ram[offset++] = fgetc(file);
 	}
 }
 
@@ -205,11 +205,27 @@ void ram_load_rom(RAM_t ram, c8_address_t offset, FILE *rom) {
  */
 void ram_load_digit_sprites(RAM_t ram, c8_address_t offset) {
 	FILE *sprites = tmpfile();
-	fwrite(STRING_LEN_COUNT(\xf0\x90\x90\x90\xf0), sprites); fflush(sprites);
-	fwrite(STRING_LEN_COUNT(\x20\x60\x20\x20\x70), sprites); fflush(sprites);
-	fwrite(STRING_LEN_COUNT(\xf0\x10\xf0\x80\xf0), sprites); fflush(sprites);
+
+	fwrite(STRING_LEN_COUNT(\xf0\x90\x90\x90\xf0), sprites);
+	fwrite(STRING_LEN_COUNT(\x20\x60\x20\x20\x70), sprites);
+	fwrite(STRING_LEN_COUNT(\xf0\x10\xf0\x80\xf0), sprites);
+	fwrite(STRING_LEN_COUNT(\xf0\x10\xf0\x10\xf0), sprites);
+	fwrite(STRING_LEN_COUNT(\x90\x90\xf0\x10\x10), sprites);
+	fwrite(STRING_LEN_COUNT(\xf0\x80\xf0\x10\xf0), sprites);
+	fwrite(STRING_LEN_COUNT(\xf0\x80\xf0\x90\xf0), sprites);
+	fwrite(STRING_LEN_COUNT(\xf0\x10\x20\x40\x40), sprites);
+	fwrite(STRING_LEN_COUNT(\xf0\x90\xf0\x90\xf0), sprites);
+	fwrite(STRING_LEN_COUNT(\xf0\x90\xf0\x10\xf0), sprites);
+	fwrite(STRING_LEN_COUNT(\xf0\x90\xf0\x90\x90), sprites);
+	fwrite(STRING_LEN_COUNT(\xe0\x90\xe0\x90\xe0), sprites);
+	fwrite(STRING_LEN_COUNT(\xf0\x80\x80\x80\xf0), sprites);
+	fwrite(STRING_LEN_COUNT(\xe0\x90\x90\x90\xe0), sprites);
+	fwrite(STRING_LEN_COUNT(\xf0\x80\xf0\x80\xf0), sprites);
+	fwrite(STRING_LEN_COUNT(\xf0\x80\xf0\x80\x80), sprites);
+	fflush(sprites);
+
 	fseek(sprites, 0, SEEK_SET);
-	ram_load_rom(ram, offset, sprites);
+	ram_load_file(ram, offset, sprites);
 }
 
 /**
@@ -249,8 +265,9 @@ void cpu_reset(CPU_t *cpu) {
  */
 void cpu_dump(CPU_t *cpu) {
 	for (int i = 0; i < 16; i++) {
-		printf("V%X = %04x\n", i, cpu->v[i]);
+		printf("V%X = %04x, ", i, cpu->v[i]);
 	}
+	printf("PC = %04x\n", cpu->pc);
 }
 
 /**
@@ -309,6 +326,9 @@ void display_clear(Display_t *display) {
  * \return bool Whether pixels were turned from on to off.
  */
 bool display_draw_row(Display_t *display, uint8_t row, uint8_t x, uint8_t y) {
+	if (y >= DISPLAY_H)
+		return false;
+
 	/** Mirror the row */
 	row = (row & 0xF0) >> 4 | (row & 0x0F) << 4;
 	row = (row & 0xCC) >> 2 | (row & 0x33) << 2;
@@ -385,12 +405,14 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 		return;
 	
 	} else if (/* 3XNN */ ((instruction >> 12) & 0xf) == 0x3 /* Skip instruction if VX is NN */) {
-		if (cpu->v[instruction >> 8 & 0xf] == (instruction & 0xff))
+		if (cpu->v[instruction >> 8 & 0xf] == (instruction & 0xff)) {
 			cpu->pc += INSTRUCTION_LENGTH;
+		}
 	
 	} else if (/* 4XNN */ ((instruction >> 12) & 0xf) == 0x4 /* Skip instruction if VX is not NN */) {
-		if (cpu->v[instruction >> 8 & 0xf] != (instruction & 0xff))
+		if (cpu->v[instruction >> 8 & 0xf] != (instruction & 0xff)) {
 			cpu->pc += INSTRUCTION_LENGTH;
+		}
 
 	} else if (/* 6XNN */ ((instruction >> 12) & 0xf) == 0x6 /* Set VX to NN */) {	
 		cpu->v[instruction >> 8 & 0xf] = instruction & 0xff;
@@ -407,7 +429,7 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 		cpu->v[instruction >> 8 & 0xf] += cpu->v[(instruction & 0xf0) >> 4];
 		cpu->v[0xf] = carry > cpu->v[instruction >> 8 & 0xf]; /** Overflown */
 	} else if (/* 8XY5 */ ((instruction >> 12) & 0xf) == 0x8 && (instruction & 0xf) == 0x5 /* VX = VX - VY, VF borrow */) {
-		cpu->v[0xf] = (cpu->v[(instruction & 0xf0) >> 4] > cpu->v[instruction >> 8 & 0xf]); /** Borrow */
+		cpu->v[0xf] = (cpu->v[(instruction & 0xf0) >> 4] <= cpu->v[instruction >> 8 & 0xf]); /** Borrow */
 		cpu->v[instruction >> 8 & 0xf] -= cpu->v[(instruction & 0xf0) >> 4];
 		
 	} else if (/* ANNN */ ((instruction >> 12) & 0xf) == 0xa /* Set I to NNN */) {
@@ -427,12 +449,12 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 			}
 		}
 		cpu->v[0xf] = unset ? 1 : 0;
+
 		display_render(cpu->display);
 
 	} else if (/* EXA1 */ (((instruction >> 12) & 0xf) == 0xe) && ((instruction & 0xff) == 0xa1) /* Skip instruction if key VX is not pressed */) {
-		if (!(cpu->input & cpu->v[instruction >> 8 & 0xf]))
+		if (!((cpu->input >> cpu->v[instruction >> 8 & 0xf]) & 0x1))
 			cpu->pc += INSTRUCTION_LENGTH;
-		printf("pressed: %x\n", cpu->input);
 		
 	} else if (/* FX07 */ (((instruction >> 12) & 0xf) == 0xf) && ((instruction & 0xff) == 0x07) /* Read delay timer to VX */) {
 		cpu->v[instruction >> 8 & 0xf] = cpu->delay;
@@ -444,7 +466,7 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 		cpu->sound = cpu->v[instruction >> 8 & 0xf];
 
 	} else if (/* FX29 */ (((instruction >> 12) & 0xf) == 0xf) && ((instruction & 0xff) == 0x29) /* Set I to sprite in digit VX */) {
-		cpu->i = BUILTIN_SPRITES_OFFSET + (cpu->v[instruction >> 8 & 0xf] * 6);
+		cpu->i = BUILTIN_SPRITES_OFFSET + (cpu->v[instruction >> 8 & 0xf] * 5);
 
 	} else if (/* FX33 */ (((instruction >> 12) & 0xf) == 0xf) && ((instruction & 0xff) == 0x33) /** BCD VX to I */) {
 		uint8_t value = cpu->v[instruction >> 8 & 0xf];
@@ -469,6 +491,17 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 }
 
 /**
+ * Trigger sound indicator.
+ *
+ * \param cpu The CPU.
+ *
+ * \return void
+ */
+void beep(CPU_t *cpu) {
+	printf("BEEP :)\n");
+}
+
+/**
  * Decrement the CPU timers.
  *
  * \param cpu The CPU that ticked.
@@ -477,7 +510,9 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
  */
 void cpu_timer_tick(CPU_t *cpu) {
 	if (cpu->delay) cpu->delay--;
-	if (cpu->sound) cpu->sound--;
+	if (cpu->sound) {
+		if (--cpu->sound == 0) beep(cpu);
+	}
 }
 
 
@@ -550,7 +585,7 @@ int main(int argc, char *argv[]) {
 	uint8_t _ram[RAM_SIZE] = { 0 };
 	RAM_t ram = _ram;
 
-	ram_load_rom(ram, ROM_OFFSET, fopen(argv[1], "rb"));
+	ram_load_file(ram, ROM_OFFSET, fopen(argv[1], "rb"));
 	ram_load_digit_sprites(ram, BUILTIN_SPRITES_OFFSET);
 
 	Display_t display;
@@ -655,7 +690,7 @@ int test(int argc, char *argv[]) {
 	FILE *tmp = tmpfile();
 	/** Call function which sets V0 to 0x6 */
 	fwrite(STRING_LEN_COUNT(\x61\x00\x22\x04\x60\x06\x00\xee), tmp); fflush(tmp);
-	fseek(tmp, 0, SEEK_SET); ram_load_rom(ram, ROM_OFFSET, tmp);
+	fseek(tmp, 0, SEEK_SET); ram_load_file(ram, ROM_OFFSET, tmp);
 
 	cpu_reset(&cpu);
 	cpu.ram = ram;
@@ -673,7 +708,7 @@ int test(int argc, char *argv[]) {
 	tmp = tmpfile();
 	/** Call itself. Stack overflow. */
 	fwrite(STRING_LEN_COUNT(\x20\x00), tmp); fflush(tmp);
-	fseek(tmp, 0, SEEK_SET); ram_load_rom(ram, 0, tmp);
+	fseek(tmp, 0, SEEK_SET); ram_load_file(ram, 0, tmp);
 	cpu_reset(&cpu);
 	cpu.pc = 0;
 	cpu.ram = ram;
@@ -713,9 +748,9 @@ int test(int argc, char *argv[]) {
 	 */
 	cpu_execute(&cpu, 0x8015);
 	TEST_EQUALS(cpu.v[0], 0);
-	TEST_EQUALS(cpu.v[0xf], 0);
-	cpu_execute(&cpu, 0x8015);
 	TEST_EQUALS(cpu.v[0xf], 1);
+	cpu_execute(&cpu, 0x8015);
+	TEST_EQUALS(cpu.v[0xf], 0);
 	TEST_EQUALS(cpu.v[0], 0xfc);
 
 	/**
