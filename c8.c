@@ -8,6 +8,17 @@
 #include <stdlib.h>
 #include <assert.h>
 
+#include "SDL.h"
+
+#define DISPLAY_W 64
+#define DISPLAY_H 32
+#define WINDOW_SCALE 16
+#define WINDOW_W WINDOW_SCALE * DISPLAY_W
+#define WINDOW_H WINDOW_SCALE * DISPLAY_H
+
+#define PIXEL_SET 255, 255, 255
+#define PIXEL_UNSET 0, 0, 0 
+
 /**
  * An 16-bit instruction.
  */
@@ -40,7 +51,12 @@ typedef struct {
 	/**
 	 * A 64x32 bitfield of pixels.
 	 */
-	uint64_t p[32];
+	uint64_t p[DISPLAY_H];
+
+	/**
+	 * An SDL renderer.
+	 */
+	SDL_Renderer *renderer;
 } Display_t;
 
 /**
@@ -137,13 +153,13 @@ void cpu_dump(CPU_t *cpu) {
 void display_dump(Display_t *display) {
 	/** Frames */
 	printf(" ");
-	for (int f = 0; f < 64; f++)
+	for (int f = 0; f < DISPLAY_W; f++)
 		printf("-");
 
-	for (int y = 0; y < 32; y++) {
+	for (int y = 0; y < DISPLAY_H; y++) {
 		printf("\n|");
 		uint64_t p = display->p[y];
-		for (int x = 0; x < 64; x++) {
+		for (int x = 0; x < DISPLAY_W; x++) {
 			printf("%c", p & 0x1 ? '*' : ' ');
 			p = p >> 1;
 		}
@@ -152,7 +168,7 @@ void display_dump(Display_t *display) {
 	printf("\n");
 
 	printf(" ");
-	for (int f = 0; f < 64; f++)
+	for (int f = 0; f < DISPLAY_W; f++)
 		printf("-");
 	printf("\n");
 }
@@ -165,7 +181,7 @@ void display_dump(Display_t *display) {
  * \return void
  */
 void display_clear(Display_t *display) {
-	for (int p = 0; p < 32; p++)
+	for (int p = 0; p < DISPLAY_H; p++)
 		display->p[p] = 0;
 }
 
@@ -190,6 +206,31 @@ bool display_draw_row(Display_t *display, uint8_t row, uint8_t x, uint8_t y) {
 	uint64_t after = display->p[y];
 
 	return before > after;
+}
+
+/**
+ * Render the display.
+ *
+ * \param display The display to render.
+ *
+ * \return void
+ */
+void display_render(Display_t *display) {
+	/** Clear */
+	SDL_SetRenderDrawColor(display->renderer, PIXEL_UNSET, SDL_ALPHA_OPAQUE);
+	SDL_RenderClear(display->renderer);
+
+	/** Draw */
+	for (int y = 0; y < DISPLAY_H; y++) {
+		uint64_t p = display->p[y];
+		for (int x = 0; x < DISPLAY_W; x++) {
+			p & 0x1 ? SDL_SetRenderDrawColor(display->renderer, PIXEL_SET, SDL_ALPHA_OPAQUE)
+				: SDL_SetRenderDrawColor(display->renderer, PIXEL_UNSET, SDL_ALPHA_OPAQUE);
+			SDL_RenderDrawPoint(display->renderer, x, y);
+			p = p >> 1;
+		}
+	}
+	SDL_RenderPresent(display->renderer);
 }
 
 /**
@@ -220,8 +261,8 @@ void cpu_execute(CPU_t *cpu, c8_instruction_t instruction) {
 		}
 		cpu->v[0xf] = unset ? 1 : 0;
 	} else {
-		fprintf(stderr, "Unknown instruction %04x!\n", instruction);
-		exit(-1);
+		// fprintf(stderr, "Unknown instruction %04x!\n", instruction);
+		return;
 	}
 
 	/** Move forward */
@@ -259,6 +300,8 @@ int main(int argc, char *argv[]) {
 		return -1;
 	}
 
+	SDL_Init(SDL_INIT_VIDEO);
+
 	CPU_t cpu;
 	cpu_reset(&cpu);
 
@@ -267,13 +310,29 @@ int main(int argc, char *argv[]) {
 
 	Display_t display;
 	display_clear(&display);
+	display.renderer = SDL_CreateRenderer(
+		SDL_CreateWindow("Chip-8 Emulator Project", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_W, WINDOW_H, 0),
+		-1, 0);
+	SDL_RenderSetScale(display.renderer, WINDOW_SCALE, WINDOW_SCALE);
 
 	cpu.rom = &rom;
 	cpu.display = &display;
 
 	while (true) {
+		SDL_Event e;
+
+		if (SDL_PollEvent(&e)) {
+			if (e.type == SDL_QUIT)
+				break;
+		}
+
 		cpu_execute(&cpu, rom_get(&rom, cpu.pc));
+		display_render(&display);
 	}
+
+	/** Cleanup */
+	SDL_DestroyRenderer(display.renderer);
+	SDL_Quit();
 
 	return 0;
 }
@@ -290,9 +349,9 @@ int test(int argc, char *argv[]) {
 	display_clear(&display);
 
 	/** Display clear */
-	for (uint64_t y = 0; y < 32; y++) {
+	for (uint64_t y = 0; y < DISPLAY_H; y++) {
 		TEST_EQUALS((uint32_t)(display.p[y] & 0xffffffff), 0);
-		TEST_EQUALS((uint32_t)((display.p[y] >> 32) & 0xffffffff), 0);
+		TEST_EQUALS((uint32_t)((display.p[y] >> DISPLAY_H) & 0xffffffff), 0);
 	}
 
 	CPU_t cpu;
