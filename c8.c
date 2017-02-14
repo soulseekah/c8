@@ -226,6 +226,8 @@ void ram_load_digit_sprites(RAM_t ram, c8_address_t offset) {
 
 	fseek(sprites, 0, SEEK_SET);
 	ram_load_file(ram, offset, sprites);
+
+	fclose(sprites);
 }
 
 /**
@@ -311,8 +313,10 @@ void display_clear(Display_t *display) {
 	for (int p = 0; p < DISPLAY_H; p++)
 		display->p[p] = 0;
 
-	SDL_SetRenderDrawColor(display->renderer, PIXEL_UNSET, SDL_ALPHA_OPAQUE);
-	SDL_RenderClear(display->renderer);
+	if (display->renderer) {
+		SDL_SetRenderDrawColor(display->renderer, PIXEL_UNSET, SDL_ALPHA_OPAQUE);
+		SDL_RenderClear(display->renderer);
+	}
 }
 
 /**
@@ -636,13 +640,15 @@ int main(int argc, char *argv[]) {
 	uint8_t _ram[RAM_SIZE] = { 0 };
 	RAM_t ram = _ram;
 
-	ram_load_file(ram, ROM_OFFSET, fopen(argv[1], "rb"));
+	FILE *rom = fopen(argv[1], "rb");
+	ram_load_file(ram, ROM_OFFSET, rom);
+	fclose(rom);
+
 	ram_load_digit_sprites(ram, BUILTIN_SPRITES_OFFSET);
 
+	SDL_Window *window = SDL_CreateWindow("Chip-8 Emulator Project", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_W, WINDOW_H, 0);
 	Display_t display;
-	display.renderer = SDL_CreateRenderer(
-		SDL_CreateWindow("Chip-8 Emulator Project", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_W, WINDOW_H, 0),
-		-1, 0);
+	display.renderer = SDL_CreateRenderer(window, -1, 0);
 	SDL_RenderSetScale(display.renderer, WINDOW_SCALE, WINDOW_SCALE);
 	display_clear(&display);
 
@@ -676,6 +682,7 @@ int main(int argc, char *argv[]) {
 
 	/** Cleanup */
 	SDL_DestroyRenderer(display.renderer);
+	SDL_DestroyWindow(window);
 	SDL_Quit();
 
 	return 0;
@@ -756,6 +763,7 @@ int test(int argc, char *argv[]) {
 	TEST_EQUALS(cpu.pc, 0x204);
 	TEST_EQUALS(cpu.sp, 0x00);
 
+	fclose(tmp);
 	tmp = tmpfile();
 	/** Call itself. Stack overflow. */
 	fwrite(STRING_LEN_COUNT(\x20\x00), tmp); fflush(tmp);
@@ -865,6 +873,8 @@ int test(int argc, char *argv[]) {
 	TEST_EQUALS(cpu.v[2], 0);
 
 	printf("\n%d tests: %d passed, %d failed\n", passed + failed, passed, failed);
+
+	fclose(tmp);
 
 	return 0;
 }

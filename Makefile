@@ -14,3 +14,7 @@ test: $(P)
 
 clean:
 	rm $(P)
+
+check: $(P)
+	TEST=1 valgrind --leak-check=full --show-leak-kinds=all ./$(P)
+	valgrind --leak-check=full --show-leak-kinds=all ./$(P) roms/PONG
