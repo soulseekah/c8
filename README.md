@@ -5,6 +5,10 @@ A CHIP-8 Emulator. A quick C refresher to keep me on my toes.
 
 `make` :)
 
+`doxygen .` to generate docs.
+
+`make test` to run tests.
+
 Make sure you have `libsdl2-dev` installed.
 
 ## Running
